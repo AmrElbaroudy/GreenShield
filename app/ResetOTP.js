@@ -54,7 +54,6 @@ const ResetOTP = () => {
         console.log('Verification Success:', data);
         
 
-          // Registration Verification Success -> Go to Login
           Alert.alert("Success", "Reset done Successfuly Please log in.");
           router.replace('/'); 
         

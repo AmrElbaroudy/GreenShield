@@ -12,13 +12,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-// 1. Import useAuth
 import { useAuth } from './context/AuthContext';
 import { API_URLS } from './_config';
 
 export default function LoginScreen() {
   const router = useRouter();
-  // 2. Get the signIn function from Context
   const { signIn } = useAuth(); 
   
   const [email, setEmail] = useState('');
@@ -46,13 +44,10 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (response.ok) {
-        // 3. Extract Token
         const token = data.data?.token?.access || data.token || data.accessToken;
         
         if (token) {
           console.log('Login Success! Updating Context...');
-          // 4. CRITICAL: Use signIn() instead of manual AsyncStorage
-          // This updates the global state so _layout knows we are logged in.
           signIn(token); 
         } else {
           setErrorMessage('Login successful but no token received.');

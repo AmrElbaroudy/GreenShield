@@ -8,6 +8,8 @@ import {
   Alert,
   SafeAreaView,
   ActivityIndicator, // Added for loading state
+  Modal,
+  ScrollView,
   Platform, 
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -23,12 +25,10 @@ import LeafMask from '../../components/LeafMask';
 import { API_URLS } from '../_config';
 import { useAuth } from '../context/AuthContext';
 
-
 export default function CameraScreen() {
   const router = useRouter();
   const authContext = useAuth(); 
   
-  // Safety check for AuthContext
   if (!authContext) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -43,7 +43,11 @@ export default function CameraScreen() {
   const [capturedImage, setCapturedImage] = useState(null);
   const [facing, setFacing] = useState('back');
   const [flash, setFlash] = useState('off');
-  const [isUploading, setIsUploading] = useState(false); 
+  const [isUploading, setIsUploading] = useState(false);
+  
+  // 2. Add State for Result Modal
+  const [modalVisible, setModalVisible] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
   
   const cameraRef = useRef(null);
 
@@ -100,14 +104,11 @@ export default function CameraScreen() {
     setIsUploading(true);
 
     try {
-      // 1. Prepare URI safely
-      // Fix: Only add file:// if it's NOT already there AND NOT a content:// URI
       let uri = capturedImage;
       if (Platform.OS === 'android' && !uri.startsWith('file://') && !uri.startsWith('content://')) {
         uri = `file://${uri}`;
       }
 
-      // 2. Prepare FormData
       const formData = new FormData();
       formData.append('image', {
         uri: uri,
@@ -117,18 +118,14 @@ export default function CameraScreen() {
 
       console.log('Uploading to:', API_URLS.UPLOAD_SCAN);
       
-      // 3. Send Request
       const response = await fetch(API_URLS.UPLOAD_SCAN, {
         method: 'POST',
         headers: {
-          // React Native sets Content-Type automatically for FormData
-          // Using lowercase 'bearer' as requested
           'Authorization': `bearer ${userToken}`,
         },
         body: formData,
       });
 
-      // 4. Handle Response
       const responseText = await response.text();
       console.log('Raw Server Response:', responseText);
 
@@ -141,11 +138,14 @@ export default function CameraScreen() {
 
       if (response.ok) {
         console.log('Upload Success:', data);
-        Alert.alert("Success", "Scan uploaded successfully!");
-        setCapturedImage(null);
+        
+        // 3. Instead of navigating, set state and open Modal
+        setScanResult(data.data); // Save result data
+        setModalVisible(true);    // Show popup
+        setCapturedImage(null);   // Clear preview
+        
       } else {
         console.error('Upload Failed:', data);
-        
         if (response.status === 401) {
           Alert.alert("Session Expired", "Please log in again.", [
             { text: "OK", onPress: () => signOut() }
@@ -165,8 +165,18 @@ export default function CameraScreen() {
   const handleRetake = () => setCapturedImage(null);
   const toggleFlash = () => setFlash(cur => (cur === 'off' ? 'on' : 'off'));
   const toggleCameraType = () => setFacing(cur => (cur === 'back' ? 'front' : 'back'));
+  
+  // Helper for severity color
+  const getSeverityColor = (severity) => {
+    switch (severity?.toUpperCase()) {
+      case 'HIGH': return '#D32F2F'; // Red
+      case 'MEDIUM': return '#F57C00'; // Orange
+      case 'LOW': return '#388E3C'; // Green
+      default: return '#999';
+    }
+  };
 
-  // --- PREVIEW MODE ---
+  // --- RENDER PREVIEW MODE ---
   if (capturedImage) {
     return (
       <View style={styles.container}>
@@ -198,6 +208,7 @@ export default function CameraScreen() {
     );
   }
 
+  // --- MAIN RENDER ---
   return (
     <View style={styles.container}>
       <CustomHeader title="New Scan" />
@@ -231,6 +242,83 @@ export default function CameraScreen() {
             </View>
           </SafeAreaView>
         </CameraView>
+
+        {/* 4. RESULT MODAL (POPUP) */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Analysis Result</Text>
+                <TouchableOpacity onPress={() => setModalVisible(false)}>
+                  <Ionicons name="close" size={28} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              {scanResult && (
+                <ScrollView contentContainerStyle={styles.resultScroll}>
+                  
+                  {/* Scanned Image */}
+                  <Image source={{ uri: scanResult.image?.url }} style={styles.resultImage} />
+
+                  {/* Disease Info */}
+                  <View style={styles.resultInfo}>
+                    <View style={styles.diseaseHeader}>
+                      <View>
+                        <Text style={styles.diseaseName}>{scanResult.prediction.disease.nameEn}</Text>
+                        <Text style={styles.diseaseNameAr}>{scanResult.prediction.disease.nameAr}</Text>
+                      </View>
+                      <View style={[styles.badge, { backgroundColor: getSeverityColor(scanResult.prediction.disease.severity) }]}>
+                        <Text style={styles.badgeText}>{scanResult.prediction.disease.severity}</Text>
+                      </View>
+                    </View>
+                    
+                    <Text style={styles.confidenceText}>
+                      Confidence: {Math.round(scanResult.prediction.confidence * 100)}%
+                    </Text>
+
+                    <View style={styles.divider} />
+
+                    {/* Treatments List */}
+                    <Text style={styles.treatmentHeaderTitle}>Recommended Treatments</Text>
+                    {scanResult.prediction.details?.map((item, index) => (
+                      <View key={item.id || index} style={styles.treatmentCard}>
+                        <View style={styles.cardHeader}>
+                          <Ionicons 
+                            name={item.isChemical ? "flask" : "leaf"} 
+                            size={20} 
+                            color={item.isChemical ? "#D32F2F" : "#388E3C"} 
+                          />
+                          <Text style={styles.treatmentTitle}>{item.titleEn}</Text>
+                        </View>
+                        <Text style={styles.treatmentDesc}>{item.descriptionEn}</Text>
+                        {item.descriptionAr && (
+                          <Text style={[styles.treatmentDesc, styles.rtlText]}>{item.descriptionAr}</Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                </ScrollView>
+              )}
+
+              {/* Close Button at Bottom */}
+              <TouchableOpacity 
+                style={styles.closeModalButton} 
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.closeModalText}>Done</Text>
+              </TouchableOpacity>
+
+            </View>
+          </View>
+        </Modal>
+
       </View>
     </View>
   );
@@ -253,19 +341,138 @@ const styles = StyleSheet.create({
   galleryButton: { width: 50, height: 50, justifyContent: 'center', alignItems: 'center', borderRadius: 25, backgroundColor: 'rgba(0,0,0,0.3)' },
   shutterButtonOuter: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.3)', justifyContent: 'center', alignItems: 'center' },
   shutterButtonInner: { width: 65, height: 65, borderRadius: 32.5, backgroundColor: '#fff' },
+  
   previewContainer: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   previewImage: { width: '100%', height: '80%', resizeMode: 'contain' },
-  previewControls: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-around', 
-    width: '100%', 
-    padding: 20, 
-    position: 'absolute', 
-    bottom: 110, 
-  },
+  previewControls: { flexDirection: 'row', justifyContent: 'space-around', width: '100%', padding: 20, position: 'absolute', bottom: 110 },
   controlButton: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 30, minWidth: 140, justifyContent: 'center' },
   retakeButton: { backgroundColor: '#fff' },
   useButton: { backgroundColor: '#3E5936' },
   controlText: { fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
   loaderWrapper: { alignItems: 'center', justifyContent: 'center', width: '100%' },
+
+  // --- MODAL STYLES ---
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#F7F5F0',
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
+    height: '85%', // Takes up mostly the full screen but leaves top visible
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  resultScroll: {
+    paddingBottom: 20,
+  },
+  resultImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 15,
+    marginBottom: 15,
+  },
+  resultInfo: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 15,
+  },
+  diseaseHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  diseaseName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  diseaseNameAr: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 2,
+    textAlign: 'left',
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  badgeText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  confidenceText: {
+    fontSize: 14,
+    color: '#3E5936',
+    fontWeight: '600',
+    marginTop: 5,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#eee',
+    marginVertical: 15,
+  },
+  treatmentHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  treatmentCard: {
+    backgroundColor: '#F9F9F9',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  treatmentTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 8,
+    flex: 1,
+  },
+  treatmentDesc: {
+    fontSize: 13,
+    color: '#555',
+    lineHeight: 18,
+    marginLeft: 28, // Align with text title
+  },
+  rtlText: {
+    textAlign: 'right',
+    color: '#777',
+    marginTop: 2,
+  },
+  closeModalButton: {
+    backgroundColor: '#3E5936',
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  closeModalText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
 });

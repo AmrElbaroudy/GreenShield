@@ -1,0 +1,49 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows manual triggering from GitHub Actions tab
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🏗 Setup Repo
+        uses: actions/checkout@v3
+
+      - name: ex 🏗 Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+          cache: 'npm'
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 🔧 Setup Expo & EAS
+        run: |
+          npm install -g eas-cli
+          npm install -g expo-cli
+
+      - name: 📦 Install Dependencies
+        run: npm install
+
+      - name: 🚀 Build APK
+        # We use --local to build on the GitHub runner (faster/free)
+        # We use --profile preview to get an .apk instead of .aab
+        run: eas build --platform android --profile preview --local --non-interactive --output=./app-release.apk
+        env:
+          # You must add EXPO_TOKEN to your GitHub Repository Secrets
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📤 Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: app-release.apk
