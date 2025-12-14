@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GreenShield",
-    "slug": "GreenShield",
+    "slug": "greanshield",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -43,6 +43,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b98cc312-8059-4f39-b0a0-829265668bec"
+      }
+    },
+    "owner": "amr_elbaroudy"
   }
 }
